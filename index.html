@@ -1,0 +1,1606 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>QR-code generator</title>
+	<style type="text/css">
+		canvas {
+			margin: 100px;
+		}
+	</style>
+</head>
+<body>
+<script type="text/javascript">
+
+const bin2Dec = function(bin) {
+	return parseInt(bin, 2)
+}
+const bin2DecAll = function(binArr) {
+	return binArr.map(bin => bin2Dec(bin))
+}
+const dec2Bin = function(dec, bits = 8) {
+	return Number(dec).toString(2).padStart(bits, "0")
+}
+const dec2BinAll = function(decArr, bits = 8) {
+	return decArr.map(dec => dec2Bin(dec, bits))
+}
+/*
+	Mode indicator table
+	Mode Name	Mode Indicator
+	Numeric Mode	0001
+	Alphanumeric Mode	0010
+	Byte Mode	0100
+	Kanji Mode	1000
+	ECI Mode	0111
+*/
+const modeTable = {
+	modes: ["numeric", "alphanumeric", "byte", "kanji"],
+	modeIndicators: ["0001", "0010", "0100", "1000", "0111"],
+	characterCountBits: [
+		[10, 9, 8],	//	Versions 1 - 9
+		[12, 11, 16], //	Versions 10 - 26
+		[14, 13, 16]	//	Versions 27 - 40
+	],
+	getModeIndex(mode) {
+		return this.modes.indexOf(mode.toLowerCase())
+	},
+	getModeIndicator: function(mode) {
+		return this.modeIndicators[this.getModeIndex(mode)] || null
+	},
+	getCharacterCountIndicator: function(length, version, mode) {
+		let countIndex
+		if (version < 10) {
+			countIndex = 0
+		} else if (version < 27) {
+			countIndex = 1
+		} else  {
+			countIndex = 2
+		}
+		const bits = this.characterCountBits[countIndex][this.getModeIndex(mode)]
+		return dec2Bin(length, bits)
+	},
+	detectMode: function(string) {
+		if (/^\d+$/.test(string)) {
+			//	numeric
+			return this.modes[0]
+		} else if (/^[0-9A-Z$%*+-./: ]+$/.test(string)) {
+			//	alphanumeric
+			return this.modes[1]
+		} else {
+			//	byte
+			return this.modes[2]
+		}
+	}
+}
+const byteCodesTable = {
+	encode: function byteEncoding(string) {
+		const result = []
+		for (let i = 0; i < string.length; i++) {
+			result.push(dec2Bin(string.charCodeAt(i)))
+		}
+		return result.join("")
+	}
+}
+const numericCodesTable = {
+	encode: function(str) {
+		//	Break up into groups of 3
+		const groups = str.match(/.{1,3}/g)
+		const result = []
+		groups.forEach(group => {
+			//	Convert that three-digit number into 10 binary bits. If a group starts with a zero, it should be interpreted as a two-digit number and you should convert it to 7 binary bits, and if there are two zeroes at the beginning of a group, it should be interpreted as a one-digit number and you should convert it to 4 binary bits. Similarly, if the final group consists of only two digits, you should convert it to 7 binary bits, and if the final group consists of only one digit, you should convert it to 4 binary bits.
+			group = Number(group).toString()
+			const bits = [0, 4, 7, 10]
+			result.push(dec2Bin(group, bits[group.length]))
+		})
+		return result.join("")
+	}
+}
+const alphanumericCodesTable = {
+	"0": 0,
+	"1": 1,
+	"2": 2,
+	"3": 3,
+	"4": 4,
+	"5": 5,
+	"6": 6,
+	"7": 7,
+	"8": 8,
+	"9": 9,
+	"A": 10,
+	"B": 11,
+	"C": 12,
+	"D": 13,
+	"E": 14,
+	"F": 15,
+	"G": 16,
+	"H": 17,
+	"I": 18,
+	"J": 19,
+	"K": 20,
+	"L": 21,
+	"M": 22,
+	"N": 23,
+	"O": 24,
+	"P": 25,
+	"Q": 26,
+	"R": 27,
+	"S": 28,
+	"T": 29,
+	"U": 30,
+	"V": 31,
+	"W": 32,
+	"X": 33,
+	"Y": 34,
+	"Z": 35,
+	" ": 36,
+	"$": 37,
+	"%": 38,
+	"*": 39,
+	"+": 40,
+	"-": 41,
+	".": 42,
+	"/": 43,
+	":": 44,
+	getCode: function(char) {
+		return this[char] || null
+	},
+	encode: function(str) {
+		//	Break up into pairs
+		const pairs = str.match(/.{1,2}/g)
+		const result = []
+		pairs.forEach(pair => {
+			let encoded
+			if (pair.length > 1) {
+				//	For each pair of characters, get the number representation (from the alphanumeric table) of the first character and multiply it by 45. Then add that number to the number representation of the second character. Now convert that number into an 11-bit binary string, padding on the left with 0s if necessary.
+				encoded = dec2Bin(this[pair[0]] * 45 + this[pair[1]], 11)
+			} else {
+				//	If you are encoding an odd number of characters, as we are here, take the numeric representation of the final character and convert it into a 6-bit binary string.
+				encoded = dec2Bin(this[pair[0]], 6)
+			}
+			result.push(encoded)
+		})
+		return result.join("")
+	}
+}
+
+/* 
+	Character capacities table
+	Version	(0-40)
+	Error Correction Level (["L", "M", "Q", "H"])
+	Numeric Mode [0]
+	Alphanumeric Mode [1]
+	Byte Mode [2]
+	Kanji Mode [3]
+*/
+const characterCapacitiesTable = {
+	data: [
+		{
+			"L": [],
+			"M": [],
+			"Q": [],
+			"H": [],
+		}, {
+			"L": [41, 25, 17, 10],
+			"M": [34, 20, 14, 8],
+			"Q": [27, 16, 11, 7],
+			"H": [17, 10, 7, 4],
+		}, {
+			"L": [77, 47, 32, 20],
+			"M": [63, 38, 26, 16],
+			"Q": [48, 29, 20, 12],
+			"H": [34, 20, 14, 8],
+		}, {
+			"L": [127, 77, 53, 32],
+			"M": [101, 61, 42, 26],
+			"Q": [77, 47, 32, 20],
+			"H": [58, 35, 24, 15],
+		}, {
+			"L": [187, 114, 78, 48],
+			"M": [149, 90, 62, 38],
+			"Q": [111, 67, 46, 28],
+			"H": [82, 50, 34, 21],
+		}, {
+			"L": [255, 154, 106, 65],
+			"M": [202, 122, 84, 52],
+			"Q": [144, 87, 60, 37],
+			"H": [106, 64, 44, 27],
+		}, {
+			"L": [322, 195, 134, 82],
+			"M": [255, 154, 106, 65],
+			"Q": [178, 108, 74, 45],
+			"H": [139, 84, 58, 36],
+		}, {
+			"L": [370, 224, 154, 95],
+			"M": [293, 178, 122, 75],
+			"Q": [207, 125, 86, 53],
+			"H": [154, 93, 64, 39],
+		}, {
+			"L": [461, 279, 192, 118],
+			"M": [365, 221, 152, 93],
+			"Q": [259, 157, 108, 66],
+			"H": [202, 122, 84, 52],
+		}, {
+			"L": [552, 335, 230, 141],
+			"M": [432, 262, 180, 111],
+			"Q": [312, 189, 130, 80],
+			"H": [235, 143, 98, 60],
+		}, {
+			"L": [652, 395, 271, 167],
+			"M": [513, 311, 213, 131],
+			"Q": [364, 221, 151, 93],
+			"H": [288, 174, 119, 74],
+		}, {
+			"L": [772, 468, 321, 198],
+			"M": [604, 366, 251, 155],
+			"Q": [427, 259, 177, 109],
+			"H": [331, 200, 137, 85],
+		}, {
+			"L": [883, 535, 367, 226],
+			"M": [691, 419, 287, 177],
+			"Q": [489, 296, 203, 125],
+			"H": [374, 227, 155, 96],
+		}, {
+			"L": [1022, 619, 425, 262],
+			"M": [796, 483, 331, 204],
+			"Q": [580, 352, 241, 149],
+			"H": [427, 259, 177, 109],
+		}, {
+			"L": [1101, 667, 458, 282],
+			"M": [871, 528, 362, 223],
+			"Q": [621, 376, 258, 159],
+			"H": [468, 283, 194, 120],
+		}, {
+			"L": [1250, 758, 520, 320],
+			"M": [991, 600, 412, 254],
+			"Q": [703, 426, 292, 180],
+			"H": [530, 321, 220, 136],
+		}, {
+			"L": [1408, 854, 586, 361],
+			"M": [1082, 656, 450, 277],
+			"Q": [775, 470, 322, 198],
+			"H": [602, 365, 250, 154],
+		}, {
+			"L": [1548, 938, 644, 397],
+			"M": [1212, 734, 504, 310],
+			"Q": [876, 531, 364, 224],
+			"H": [674, 408, 280, 173],
+		}, {
+			"L": [1725, 1046, 718, 442],
+			"M": [1346, 816, 560, 345],
+			"Q": [948, 574, 394, 243],
+			"H": [746, 452, 310, 191],
+		}, {
+			"L": [1903, 1153, 792, 488],
+			"M": [1500, 909, 624, 384],
+			"Q": [1063, 644, 442, 272],
+			"H": [813, 493, 338, 208],
+		}, {
+			"L": [2061, 1249, 858, 528],
+			"M": [1600, 970, 666, 410],
+			"Q": [1159, 702, 482, 297],
+			"H": [919, 557, 382, 235],
+		}, {
+			"L": [2232, 1352, 929, 572],
+			"M": [1708, 1035, 711, 438],
+			"Q": [1224, 742, 509, 314],
+			"H": [969, 587, 403, 248],
+		}, {
+			"L": [2409, 1460, 1003, 618],
+			"M": [1872, 1134, 779, 480],
+			"Q": [1358, 823, 565, 348],
+			"H": [1056, 640, 439, 270],
+		}, {
+			"L": [2620, 1588, 1091, 672],
+			"M": [2059, 1248, 857, 528],
+			"Q": [1468, 890, 611, 376],
+			"H": [1108, 672, 461, 284],
+		}, {
+			"L": [2812, 1704, 1171, 721],
+			"M": [2188, 1326, 911, 561],
+			"Q": [1588, 963, 661, 407],
+			"H": [1228, 744, 511, 315],
+		}, {
+			"L": [3057, 1853, 1273, 784],
+			"M": [2395, 1451, 997, 614],
+			"Q": [1718, 1041, 715, 440],
+			"H": [1286, 779, 535, 330],
+		}, {
+			"L": [3283, 1990, 1367, 842],
+			"M": [2544, 1542, 1059, 652],
+			"Q": [1804, 1094, 751, 462],
+			"H": [1425, 864, 593, 365],
+		}, {
+			"L": [3517, 2132, 1465, 902],
+			"M": [2701, 1637, 1125, 692],
+			"Q": [1933, 1172, 805, 496],
+			"H": [1501, 910, 625, 385],
+		}, {
+			"L": [3669, 2223, 1528, 940],
+			"M": [2857, 1732, 1190, 732],
+			"Q": [2085, 1263, 868, 534],
+			"H": [1581, 958, 658, 405],
+		}, {
+			"L": [3909, 2369, 1628, 1002],
+			"M": [3035, 1839, 1264, 778],
+			"Q": [2181, 1322, 908, 559],
+			"H": [1677, 1016, 698, 430],
+		}, {
+			"L": [4158, 2520, 1732, 1066],
+			"M": [3289, 1994, 1370, 843],
+			"Q": [2358, 1429, 982, 604],
+			"H": [1782, 1080, 742, 457],
+		}, {
+			"L": [4417, 2677, 1840, 1132],
+			"M": [3486, 2113, 1452, 894],
+			"Q": [2473, 1499, 1030, 634],
+			"H": [1897, 1150, 790, 486],
+		}, {
+			"L": [4686, 2840, 1952, 1201],
+			"M": [3693, 2238, 1538, 947],
+			"Q": [2670, 1618, 1112, 684],
+			"H": [2022, 1226, 842, 518],
+		}, {
+			"L": [4965, 3009, 2068, 1273],
+			"M": [3909, 2369, 1628, 1002],
+			"Q": [2805, 1700, 1168, 719],
+			"H": [2157, 1307, 898, 553],
+		}, {
+			"L": [5253, 3183, 2188, 1347],
+			"M": [4134, 2506, 1722, 1060],
+			"Q": [2949, 1787, 1228, 756],
+			"H": [2301, 1394, 958, 590],
+		}, {
+			"L": [5529, 3351, 2303, 1417],
+			"M": [4343, 2632, 1809, 1113],
+			"Q": [3081, 1867, 1283, 790],
+			"H": [2361, 1431, 983, 605],
+		}, {
+			"L": [5836, 3537, 2431, 1496],
+			"M": [4588, 2780, 1911, 1176],
+			"Q": [3244, 1966, 1351, 832],
+			"H": [2524, 1530, 1051, 647],
+		}, {
+			"L": [6153, 3729, 2563, 1577],
+			"M": [4775, 2894, 1989, 1224],
+			"Q": [3417, 2071, 1423, 876],
+			"H": [2625, 1591, 1093, 673],
+		}, {
+			"L": [6479, 3927, 2699, 1661],
+			"M": [5039, 3054, 2099, 1292],
+			"Q": [3599, 2181, 1499, 923],
+			"H": [2735, 1658, 1139, 701],
+		}, {
+			"L": [6743, 4087, 2809, 1729],
+			"M": [5313, 3220, 2213, 1362],
+			"Q": [3791, 2298, 1579, 972],
+			"H": [2927, 1774, 1219, 750],
+		}, {
+			"L": [7089, 4296, 2953, 1817],
+			"M": [5596, 3391, 2331, 1435],
+			"Q": [3993, 2420, 1663, 1024],
+			"H": [3057, 1852, 1273, 784],
+		}
+	],
+	getCapacity: function(version, ecLevel, mode) {
+		return this.data?.[version]?.[ecLevel]?.[modeTable.getModeIndex(mode)] || null
+	},
+	getVersion: function(bytes, ecLevel, mode) {
+		return this.data.findIndex(data => data[ecLevel][modeTable.getModeIndex(mode)] > bytes)
+	}
+}
+/*
+	Error correction table
+	    Version and EC Level
+	tc:  Total Number of Data Codewords for this Version and EC Level
+	ecb:  EC Codewords Per Block
+	b1:  Number of Blocks in Group 1
+	cb1: Number of Data Codewords in Each of Group 1's Blocks
+	b2:  Number of Blocks in Group 2
+	cb2: Number of Data Codewords in Each of Group 2's Blocks
+*/
+const errorCorrectionTable = {
+	"1-L": {tc: 19, ecb: 7, b1: 1, cb1: 19, b2: null, cb2: null},
+	"1-M": {tc: 16, ecb: 10, b1: 1, cb1: 16, b2: null, cb2: null},
+	"1-Q": {tc: 13, ecb: 13, b1: 1, cb1: 13, b2: null, cb2: null},
+	"1-H": {tc: 9, ecb: 17, b1: 1, cb1: 9, b2: null, cb2: null},
+	"2-L": {tc: 34, ecb: 10, b1: 1, cb1: 34, b2: null, cb2: null},
+	"2-M": {tc: 28, ecb: 16, b1: 1, cb1: 28, b2: null, cb2: null},
+	"2-Q": {tc: 22, ecb: 22, b1: 1, cb1: 22, b2: null, cb2: null},
+	"2-H": {tc: 16, ecb: 28, b1: 1, cb1: 16, b2: null, cb2: null},
+	"3-L": {tc: 55, ecb: 15, b1: 1, cb1: 55, b2: null, cb2: null},
+	"3-M": {tc: 44, ecb: 26, b1: 1, cb1: 44, b2: null, cb2: null},
+	"3-Q": {tc: 34, ecb: 18, b1: 2, cb1: 17, b2: null, cb2: null},
+	"3-H": {tc: 26, ecb: 22, b1: 2, cb1: 13, b2: null, cb2: null},
+	"4-L": {tc: 80, ecb: 20, b1: 1, cb1: 80, b2: null, cb2: null},
+	"4-M": {tc: 64, ecb: 18, b1: 2, cb1: 32, b2: null, cb2: null},
+	"4-Q": {tc: 48, ecb: 26, b1: 2, cb1: 24, b2: null, cb2: null},
+	"4-H": {tc: 36, ecb: 16, b1: 4, cb1: 9, b2: null, cb2: null},
+	"5-L": {tc: 108, ecb: 26, b1: 1, cb1: 108, b2: null, cb2: null},
+	"5-M": {tc: 86, ecb: 24, b1: 2, cb1: 43, b2: null, cb2: null},
+	"5-Q": {tc: 62, ecb: 18, b1: 2, cb1: 15, b2: 2, cb2: 16},
+	"5-H": {tc: 46, ecb: 22, b1: 2, cb1: 11, b2: 2, cb2: 12},
+	"6-L": {tc: 136, ecb: 18, b1: 2, cb1: 68, b2: null, cb2: null},
+	"6-M": {tc: 108, ecb: 16, b1: 4, cb1: 27, b2: null, cb2: null},
+	"6-Q": {tc: 76, ecb: 24, b1: 4, cb1: 19, b2: null, cb2: null},
+	"6-H": {tc: 60, ecb: 28, b1: 4, cb1: 15, b2: null, cb2: null},
+	"7-L": {tc: 156, ecb: 20, b1: 2, cb1: 78, b2: null, cb2: null},
+	"7-M": {tc: 124, ecb: 18, b1: 4, cb1: 31, b2: null, cb2: null},
+	"7-Q": {tc: 88, ecb: 18, b1: 2, cb1: 14, b2: 4, cb2: 15},
+	"7-H": {tc: 66, ecb: 26, b1: 4, cb1: 13, b2: 1, cb2: 14},
+	"8-L": {tc: 194, ecb: 24, b1: 2, cb1: 97, b2: null, cb2: null},
+	"8-M": {tc: 154, ecb: 22, b1: 2, cb1: 38, b2: 2, cb2: 39},
+	"8-Q": {tc: 110, ecb: 22, b1: 4, cb1: 18, b2: 2, cb2: 19},
+	"8-H": {tc: 86, ecb: 26, b1: 4, cb1: 14, b2: 2, cb2: 15},
+	"9-L": {tc: 232, ecb: 30, b1: 2, cb1: 116, b2: null, cb2: null},
+	"9-M": {tc: 182, ecb: 22, b1: 3, cb1: 36, b2: 2, cb2: 37},
+	"9-Q": {tc: 132, ecb: 20, b1: 4, cb1: 16, b2: 4, cb2: 17},
+	"9-H": {tc: 100, ecb: 24, b1: 4, cb1: 12, b2: 4, cb2: 13},
+	"10-L": {tc: 274, ecb: 18, b1: 2, cb1: 68, b2: 2, cb2: 69},
+	"10-M": {tc: 216, ecb: 26, b1: 4, cb1: 43, b2: 1, cb2: 44},
+	"10-Q": {tc: 154, ecb: 24, b1: 6, cb1: 19, b2: 2, cb2: 20},
+	"10-H": {tc: 122, ecb: 28, b1: 6, cb1: 15, b2: 2, cb2: 16},
+	"11-L": {tc: 324, ecb: 20, b1: 4, cb1: 81, b2: null, cb2: null},
+	"11-M": {tc: 254, ecb: 30, b1: 1, cb1: 50, b2: 4, cb2: 51},
+	"11-Q": {tc: 180, ecb: 28, b1: 4, cb1: 22, b2: 4, cb2: 23},
+	"11-H": {tc: 140, ecb: 24, b1: 3, cb1: 12, b2: 8, cb2: 13},
+	"12-L": {tc: 370, ecb: 24, b1: 2, cb1: 92, b2: 2, cb2: 93},
+	"12-M": {tc: 290, ecb: 22, b1: 6, cb1: 36, b2: 2, cb2: 37},
+	"12-Q": {tc: 206, ecb: 26, b1: 4, cb1: 20, b2: 6, cb2: 21},
+	"12-H": {tc: 158, ecb: 28, b1: 7, cb1: 14, b2: 4, cb2: 15},
+	"13-L": {tc: 428, ecb: 26, b1: 4, cb1: 107, b2: null, cb2: null},
+	"13-M": {tc: 334, ecb: 22, b1: 8, cb1: 37, b2: 1, cb2: 38},
+	"13-Q": {tc: 244, ecb: 24, b1: 8, cb1: 20, b2: 4, cb2: 21},
+	"13-H": {tc: 180, ecb: 22, b1: 12, cb1: 11, b2: 4, cb2: 12},
+	"14-L": {tc: 461, ecb: 30, b1: 3, cb1: 115, b2: 1, cb2: 116},
+	"14-M": {tc: 365, ecb: 24, b1: 4, cb1: 40, b2: 5, cb2: 41},
+	"14-Q": {tc: 261, ecb: 20, b1: 11, cb1: 16, b2: 5, cb2: 17},
+	"14-H": {tc: 197, ecb: 24, b1: 11, cb1: 12, b2: 5, cb2: 13},
+	"15-L": {tc: 523, ecb: 22, b1: 5, cb1: 87, b2: 1, cb2: 88},
+	"15-M": {tc: 415, ecb: 24, b1: 5, cb1: 41, b2: 5, cb2: 42},
+	"15-Q": {tc: 295, ecb: 30, b1: 5, cb1: 24, b2: 7, cb2: 25},
+	"15-H": {tc: 223, ecb: 24, b1: 11, cb1: 12, b2: 7, cb2: 13},
+	"16-L": {tc: 589, ecb: 24, b1: 5, cb1: 98, b2: 1, cb2: 99},
+	"16-M": {tc: 453, ecb: 28, b1: 7, cb1: 45, b2: 3, cb2: 46},
+	"16-Q": {tc: 325, ecb: 24, b1: 15, cb1: 19, b2: 2, cb2: 20},
+	"16-H": {tc: 253, ecb: 30, b1: 3, cb1: 15, b2: 13, cb2: 16},
+	"17-L": {tc: 647, ecb: 28, b1: 1, cb1: 107, b2: 5, cb2: 108},
+	"17-M": {tc: 507, ecb: 28, b1: 10, cb1: 46, b2: 1, cb2: 47},
+	"17-Q": {tc: 367, ecb: 28, b1: 1, cb1: 22, b2: 15, cb2: 23},
+	"17-H": {tc: 283, ecb: 28, b1: 2, cb1: 14, b2: 17, cb2: 15},
+	"18-L": {tc: 721, ecb: 30, b1: 5, cb1: 120, b2: 1, cb2: 121},
+	"18-M": {tc: 563, ecb: 26, b1: 9, cb1: 43, b2: 4, cb2: 44},
+	"18-Q": {tc: 397, ecb: 28, b1: 17, cb1: 22, b2: 1, cb2: 23},
+	"18-H": {tc: 313, ecb: 28, b1: 2, cb1: 14, b2: 19, cb2: 15},
+	"19-L": {tc: 795, ecb: 28, b1: 3, cb1: 113, b2: 4, cb2: 114},
+	"19-M": {tc: 627, ecb: 26, b1: 3, cb1: 44, b2: 11, cb2: 45},
+	"19-Q": {tc: 445, ecb: 26, b1: 17, cb1: 21, b2: 4, cb2: 22},
+	"19-H": {tc: 341, ecb: 26, b1: 9, cb1: 13, b2: 16, cb2: 14},
+	"20-L": {tc: 861, ecb: 28, b1: 3, cb1: 107, b2: 5, cb2: 108},
+	"20-M": {tc: 669, ecb: 26, b1: 3, cb1: 41, b2: 13, cb2: 42},
+	"20-Q": {tc: 485, ecb: 30, b1: 15, cb1: 24, b2: 5, cb2: 25},
+	"20-H": {tc: 385, ecb: 28, b1: 15, cb1: 15, b2: 10, cb2: 16},
+	"21-L": {tc: 932, ecb: 28, b1: 4, cb1: 116, b2: 4, cb2: 117},
+	"21-M": {tc: 714, ecb: 26, b1: 17, cb1: 42, b2: null, cb2: null},
+	"21-Q": {tc: 512, ecb: 28, b1: 17, cb1: 22, b2: 6, cb2: 23},
+	"21-H": {tc: 406, ecb: 30, b1: 19, cb1: 16, b2: 6, cb2: 17},
+	"22-L": {tc: 1006, ecb: 28, b1: 2, cb1: 111, b2: 7, cb2: 112},
+	"22-M": {tc: 782, ecb: 28, b1: 17, cb1: 46, b2: null, cb2: null},
+	"22-Q": {tc: 568, ecb: 30, b1: 7, cb1: 24, b2: 16, cb2: 25},
+	"22-H": {tc: 442, ecb: 24, b1: 34, cb1: 13, b2: null, cb2: null},
+	"23-L": {tc: 1094, ecb: 30, b1: 4, cb1: 121, b2: 5, cb2: 122},
+	"23-M": {tc: 860, ecb: 28, b1: 4, cb1: 47, b2: 14, cb2: 48},
+	"23-Q": {tc: 614, ecb: 30, b1: 11, cb1: 24, b2: 14, cb2: 25},
+	"23-H": {tc: 464, ecb: 30, b1: 16, cb1: 15, b2: 14, cb2: 16},
+	"24-L": {tc: 1174, ecb: 30, b1: 6, cb1: 117, b2: 4, cb2: 118},
+	"24-M": {tc: 914, ecb: 28, b1: 6, cb1: 45, b2: 14, cb2: 46},
+	"24-Q": {tc: 664, ecb: 30, b1: 11, cb1: 24, b2: 16, cb2: 25},
+	"24-H": {tc: 514, ecb: 30, b1: 30, cb1: 16, b2: 2, cb2: 17},
+	"25-L": {tc: 1276, ecb: 26, b1: 8, cb1: 106, b2: 4, cb2: 107},
+	"25-M": {tc: 1000, ecb: 28, b1: 8, cb1: 47, b2: 13, cb2: 48},
+	"25-Q": {tc: 718, ecb: 30, b1: 7, cb1: 24, b2: 22, cb2: 25},
+	"25-H": {tc: 538, ecb: 30, b1: 22, cb1: 15, b2: 13, cb2: 16},
+	"26-L": {tc: 1370, ecb: 28, b1: 10, cb1: 114, b2: 2, cb2: 115},
+	"26-M": {tc: 1062, ecb: 28, b1: 19, cb1: 46, b2: 4, cb2: 47},
+	"26-Q": {tc: 754, ecb: 28, b1: 28, cb1: 22, b2: 6, cb2: 23},
+	"26-H": {tc: 596, ecb: 30, b1: 33, cb1: 16, b2: 4, cb2: 17},
+	"27-L": {tc: 1468, ecb: 30, b1: 8, cb1: 122, b2: 4, cb2: 123},
+	"27-M": {tc: 1128, ecb: 28, b1: 22, cb1: 45, b2: 3, cb2: 46},
+	"27-Q": {tc: 808, ecb: 30, b1: 8, cb1: 23, b2: 26, cb2: 24},
+	"27-H": {tc: 628, ecb: 30, b1: 12, cb1: 15, b2: 28, cb2: 16},
+	"28-L": {tc: 1531, ecb: 30, b1: 3, cb1: 117, b2: 10, cb2: 118},
+	"28-M": {tc: 1193, ecb: 28, b1: 3, cb1: 45, b2: 23, cb2: 46},
+	"28-Q": {tc: 871, ecb: 30, b1: 4, cb1: 24, b2: 31, cb2: 25},
+	"28-H": {tc: 661, ecb: 30, b1: 11, cb1: 15, b2: 31, cb2: 16},
+	"29-L": {tc: 1631, ecb: 30, b1: 7, cb1: 116, b2: 7, cb2: 117},
+	"29-M": {tc: 1267, ecb: 28, b1: 21, cb1: 45, b2: 7, cb2: 46},
+	"29-Q": {tc: 911, ecb: 30, b1: 1, cb1: 23, b2: 37, cb2: 24},
+	"29-H": {tc: 701, ecb: 30, b1: 19, cb1: 15, b2: 26, cb2: 16},
+	"30-L": {tc: 1735, ecb: 30, b1: 5, cb1: 115, b2: 10, cb2: 116},
+	"30-M": {tc: 1373, ecb: 28, b1: 19, cb1: 47, b2: 10, cb2: 48},
+	"30-Q": {tc: 985, ecb: 30, b1: 15, cb1: 24, b2: 25, cb2: 25},
+	"30-H": {tc: 745, ecb: 30, b1: 23, cb1: 15, b2: 25, cb2: 16},
+	"31-L": {tc: 1843, ecb: 30, b1: 13, cb1: 115, b2: 3, cb2: 116},
+	"31-M": {tc: 1455, ecb: 28, b1: 2, cb1: 46, b2: 29, cb2: 47},
+	"31-Q": {tc: 1033, ecb: 30, b1: 42, cb1: 24, b2: 1, cb2: 25},
+	"31-H": {tc: 793, ecb: 30, b1: 23, cb1: 15, b2: 28, cb2: 16},
+	"32-L": {tc: 1955, ecb: 30, b1: 17, cb1: 115, b2: null, cb2: null},
+	"32-M": {tc: 1541, ecb: 28, b1: 10, cb1: 46, b2: 23, cb2: 47},
+	"32-Q": {tc: 1115, ecb: 30, b1: 10, cb1: 24, b2: 35, cb2: 25},
+	"32-H": {tc: 845, ecb: 30, b1: 19, cb1: 15, b2: 35, cb2: 16},
+	"33-L": {tc: 2071, ecb: 30, b1: 17, cb1: 115, b2: 1, cb2: 116},
+	"33-M": {tc: 1631, ecb: 28, b1: 14, cb1: 46, b2: 21, cb2: 47},
+	"33-Q": {tc: 1171, ecb: 30, b1: 29, cb1: 24, b2: 19, cb2: 25},
+	"33-H": {tc: 901, ecb: 30, b1: 11, cb1: 15, b2: 46, cb2: 16},
+	"34-L": {tc: 2191, ecb: 30, b1: 13, cb1: 115, b2: 6, cb2: 116},
+	"34-M": {tc: 1725, ecb: 28, b1: 14, cb1: 46, b2: 23, cb2: 47},
+	"34-Q": {tc: 1231, ecb: 30, b1: 44, cb1: 24, b2: 7, cb2: 25},
+	"34-H": {tc: 961, ecb: 30, b1: 59, cb1: 16, b2: 1, cb2: 17},
+	"35-L": {tc: 2306, ecb: 30, b1: 12, cb1: 121, b2: 7, cb2: 122},
+	"35-M": {tc: 1812, ecb: 28, b1: 12, cb1: 47, b2: 26, cb2: 48},
+	"35-Q": {tc: 1286, ecb: 30, b1: 39, cb1: 24, b2: 14, cb2: 25},
+	"35-H": {tc: 986, ecb: 30, b1: 22, cb1: 15, b2: 41, cb2: 16},
+	"36-L": {tc: 2434, ecb: 30, b1: 6, cb1: 121, b2: 14, cb2: 122},
+	"36-M": {tc: 1914, ecb: 28, b1: 6, cb1: 47, b2: 34, cb2: 48},
+	"36-Q": {tc: 1354, ecb: 30, b1: 46, cb1: 24, b2: 10, cb2: 25},
+	"36-H": {tc: 1054, ecb: 30, b1: 2, cb1: 15, b2: 64, cb2: 16},
+	"37-L": {tc: 2566, ecb: 30, b1: 17, cb1: 122, b2: 4, cb2: 123},
+	"37-M": {tc: 1992, ecb: 28, b1: 29, cb1: 46, b2: 14, cb2: 47},
+	"37-Q": {tc: 1426, ecb: 30, b1: 49, cb1: 24, b2: 10, cb2: 25},
+	"37-H": {tc: 1096, ecb: 30, b1: 24, cb1: 15, b2: 46, cb2: 16},
+	"38-L": {tc: 2702, ecb: 30, b1: 4, cb1: 122, b2: 18, cb2: 123},
+	"38-M": {tc: 2102, ecb: 28, b1: 13, cb1: 46, b2: 32, cb2: 47},
+	"38-Q": {tc: 1502, ecb: 30, b1: 48, cb1: 24, b2: 14, cb2: 25},
+	"38-H": {tc: 1142, ecb: 30, b1: 42, cb1: 15, b2: 32, cb2: 16},
+	"39-L": {tc: 2812, ecb: 30, b1: 20, cb1: 117, b2: 4, cb2: 118},
+	"39-M": {tc: 2216, ecb: 28, b1: 40, cb1: 47, b2: 7, cb2: 48},
+	"39-Q": {tc: 1582, ecb: 30, b1: 43, cb1: 24, b2: 22, cb2: 25},
+	"39-H": {tc: 1222, ecb: 30, b1: 10, cb1: 15, b2: 67, cb2: 16},
+	"40-L": {tc: 2956, ecb: 30, b1: 19, cb1: 118, b2: 6, cb2: 119},
+	"40-M": {tc: 2334, ecb: 28, b1: 18, cb1: 47, b2: 31, cb2: 48},
+	"40-Q": {tc: 1666, ecb: 30, b1: 34, cb1: 24, b2: 34, cb2: 25},
+	"40-H": {tc: 1276, ecb: 30, b1: 20, cb1: 15, b2: 61, cb2: 16},
+	getData: function(version, ecLevel, field = false) {
+		const data = this[`${version}-${ecLevel}`] || null
+		if (data && field && data[field]) {
+			return data[field]
+		}
+		return data
+	}
+}
+
+/*
+Format Information Strings
+QR Codes use error correction encoding. This is a way of generating redundant data that QR code scanners can use to detect and fix errors in the scanned code.
+*/
+const formatInformationTable = {
+	"L": [
+		"111011111000100",
+		"111001011110011",
+		"111110110101010",
+		"111100010011101",
+		"110011000101111",
+		"110001100011000",
+		"110110001000001",
+		"110100101110110"
+	],
+	"M": [
+		"101010000010010",
+		"101000100100101",
+		"101111001111100",
+		"101101101001011",
+		"100010111111001",
+		"100000011001110",
+		"100111110010111",
+		"100101010100000"
+	],
+	"Q": [
+		"011010101011111",
+		"011000001101000",
+		"011111100110001",
+		"011101000000110",
+		"010010010110100",
+		"010000110000011",
+		"010111011011010",
+		"010101111101101"
+	],
+	"H": [
+		"001011010001001",
+		"001001110111110",
+		"001110011100111",
+		"001100111010000",
+		"000011101100010",
+		"000001001010101",
+		"000110100001100",
+		"000100000111011"
+	],
+	getFormatCode: function(level, mask) {
+		return this?.[level]?.[mask]
+	}
+}
+/*
+About Version Information Strings
+The size of a QR code is represented by a number called the version number. Codes that are version 7 and larger must include two 6x3 rectangular blocks that contain the version information string. For details on how these version information strings are calculated and where they should be placed in the QR code, please see the Format and Version Information page.
+*/
+const versionInformationTable = {
+	versions: [
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"000111110010010100",
+		"001000010110111100",
+		"001001101010011001",
+		"001010010011010011",
+		"001011101111110110",
+		"001100011101100010",
+		"001101100001000111",
+		"001110011000001101",
+		"001111100100101000",
+		"010000101101111000",
+		"010001010001011101",
+		"010010101000010111",
+		"010011010100110010",
+		"010100100110100110",
+		"010101011010000011",
+		"010110100011001001",
+		"010111011111101100",
+		"011000111011000100",
+		"011001000111100001",
+		"011010111110101011",
+		"011011000010001110",
+		"011100110000011010",
+		"011101001100111111",
+		"011110110101110101",
+		"011111001001010000",
+		"100000100111010101",
+		"100001011011110000",
+		"100010100010111010",
+		"100011011110011111",
+		"100100101100001011",
+		"100101010000101110",
+		"100110101001100100",
+		"100111010101000001",
+		"101000110001101001"
+	],
+	getVersionCode: function(version) {
+		return this.versions[version]
+	}
+}
+
+/*
+	Error Correction Level	Bits	Integer Equivalent
+	L						01		1
+	M						00		0
+	Q						11		3
+	H						10		2
+*/
+
+const errorCorrectionLevelTable = {
+	levels: {
+		"M": "00", 
+		"L": "01", 
+		"H": "10", 
+		"Q": "11"
+	},
+	getLevelCode: function(level) {
+		return this.levels[level]
+	}
+}
+
+/*
+	Remainder bits for final code
+	table[version] = remainderBits
+*/
+const remainderBitsTable = [0, 0, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0]
+
+// The 21x21 pixel size is version 1, 25x25 is version 2, and so on. The 177x177 size is version 40.
+const codeVersionTable = {
+	remainderBits: [0, 0, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0],
+	alingmentPos: [
+		[],
+		[],
+		[6, 18],
+		[6, 22],
+		[6, 26],
+		[6, 30],
+		[6, 34],
+		[6, 22, 38],
+		[6, 24, 42],
+		[6, 26, 46],
+		[6, 28, 50],
+		[6, 30, 54],
+		[6, 32, 58],
+		[6, 34, 62],
+		[6, 26, 46, 66],
+		[6, 26, 48, 70],
+		[6, 26, 50, 74],
+		[6, 30, 54, 78],
+		[6, 30, 56, 82],
+		[6, 30, 58, 86],
+		[6, 34, 62, 90],
+		[6, 28, 50, 72, 94],
+		[6, 26, 50, 74, 98],
+		[6, 30, 54, 78, 102],
+		[6, 28, 54, 80, 106],
+		[6, 32, 58, 84, 110],
+		[6, 30, 58, 86, 114],
+		[6, 34, 62, 90, 118],
+		[6, 26, 50, 74, 98, 122],
+		[6, 30, 54, 78, 102, 126],
+		[6, 26, 52, 78, 104, 130],
+		[6, 30, 56, 82, 108, 134],
+		[6, 34, 60, 86, 112, 138],
+		[6, 30, 58, 86, 114, 142],
+		[6, 34, 62, 90, 118, 146],
+		[6, 30, 54, 78, 102, 126, 150],
+		[6, 24, 50, 76, 102, 128, 154],
+		[6, 28, 54, 80, 106, 132, 158],
+		[6, 32, 58, 84, 110, 136, 162],
+		[6, 26, 54, 82, 110, 138, 166],
+		[6, 30, 58, 86, 114, 142, 170],
+	],
+	getSize(version) {
+		return version * 4 + 17
+	},
+	getReminderBits(version) {
+		return this.remainderBits[version] || 0
+	},
+	getAlignmentPos(version) {
+		return this.alingmentPos[version] || []
+	}
+}
+
+/*
+	Conversion to alpha notation table
+	table[i] = [log(i), alog(i)]
+*/
+const logTable = {
+	data: [
+		[1, null],
+		[2, 0],
+		[4, 1],
+		[8, 25],
+		[16, 2],
+		[32, 50],
+		[64, 26],
+		[128, 198],
+		[29, 3],
+		[58, 223],
+		[116, 51],
+		[232, 238],
+		[205, 27],
+		[135, 104],
+		[19, 199],
+		[38, 75],
+		[76, 4],
+		[152, 100],
+		[45, 224],
+		[90, 14],
+		[180, 52],
+		[117, 141],
+		[234, 239],
+		[201, 129],
+		[143, 28],
+		[3, 193],
+		[6, 105],
+		[12, 248],
+		[24, 200],
+		[48, 8],
+		[96, 76],
+		[192, 113],
+		[157, 5],
+		[39, 138],
+		[78, 101],
+		[156, 47],
+		[37, 225],
+		[74, 36],
+		[148, 15],
+		[53, 33],
+		[106, 53],
+		[212, 147],
+		[181, 142],
+		[119, 218],
+		[238, 240],
+		[193, 18],
+		[159, 130],
+		[35, 69],
+		[70, 29],
+		[140, 181],
+		[5, 194],
+		[10, 125],
+		[20, 106],
+		[40, 39],
+		[80, 249],
+		[160, 185],
+		[93, 201],
+		[186, 154],
+		[105, 9],
+		[210, 120],
+		[185, 77],
+		[111, 228],
+		[222, 114],
+		[161, 166],
+		[95, 6],
+		[190, 191],
+		[97, 139],
+		[194, 98],
+		[153, 102],
+		[47, 221],
+		[94, 48],
+		[188, 253],
+		[101, 226],
+		[202, 152],
+		[137, 37],
+		[15, 179],
+		[30, 16],
+		[60, 145],
+		[120, 34],
+		[240, 136],
+		[253, 54],
+		[231, 208],
+		[211, 148],
+		[187, 206],
+		[107, 143],
+		[214, 150],
+		[177, 219],
+		[127, 189],
+		[254, 241],
+		[225, 210],
+		[223, 19],
+		[163, 92],
+		[91, 131],
+		[182, 56],
+		[113, 70],
+		[226, 64],
+		[217, 30],
+		[175, 66],
+		[67, 182],
+		[134, 163],
+		[17, 195],
+		[34, 72],
+		[68, 126],
+		[136, 110],
+		[13, 107],
+		[26, 58],
+		[52, 40],
+		[104, 84],
+		[208, 250],
+		[189, 133],
+		[103, 186],
+		[206, 61],
+		[129, 202],
+		[31, 94],
+		[62, 155],
+		[124, 159],
+		[248, 10],
+		[237, 21],
+		[199, 121],
+		[147, 43],
+		[59, 78],
+		[118, 212],
+		[236, 229],
+		[197, 172],
+		[151, 115],
+		[51, 243],
+		[102, 167],
+		[204, 87],
+		[133, 7],
+		[23, 112],
+		[46, 192],
+		[92, 247],
+		[184, 140],
+		[109, 128],
+		[218, 99],
+		[169, 13],
+		[79, 103],
+		[158, 74],
+		[33, 222],
+		[66, 237],
+		[132, 49],
+		[21, 197],
+		[42, 254],
+		[84, 24],
+		[168, 227],
+		[77, 165],
+		[154, 153],
+		[41, 119],
+		[82, 38],
+		[164, 184],
+		[85, 180],
+		[170, 124],
+		[73, 17],
+		[146, 68],
+		[57, 146],
+		[114, 217],
+		[228, 35],
+		[213, 32],
+		[183, 137],
+		[115, 46],
+		[230, 55],
+		[209, 63],
+		[191, 209],
+		[99, 91],
+		[198, 149],
+		[145, 188],
+		[63, 207],
+		[126, 205],
+		[252, 144],
+		[229, 135],
+		[215, 151],
+		[179, 178],
+		[123, 220],
+		[246, 252],
+		[241, 190],
+		[255, 97],
+		[227, 242],
+		[219, 86],
+		[171, 211],
+		[75, 171],
+		[150, 20],
+		[49, 42],
+		[98, 93],
+		[196, 158],
+		[149, 132],
+		[55, 60],
+		[110, 57],
+		[220, 83],
+		[165, 71],
+		[87, 109],
+		[174, 65],
+		[65, 162],
+		[130, 31],
+		[25, 45],
+		[50, 67],
+		[100, 216],
+		[200, 183],
+		[141, 123],
+		[7, 164],
+		[14, 118],
+		[28, 196],
+		[56, 23],
+		[112, 73],
+		[224, 236],
+		[221, 127],
+		[167, 12],
+		[83, 111],
+		[166, 246],
+		[81, 108],
+		[162, 161],
+		[89, 59],
+		[178, 82],
+		[121, 41],
+		[242, 157],
+		[249, 85],
+		[239, 170],
+		[195, 251],
+		[155, 96],
+		[43, 134],
+		[86, 177],
+		[172, 187],
+		[69, 204],
+		[138, 62],
+		[9, 90],
+		[18, 203],
+		[36, 89],
+		[72, 95],
+		[144, 176],
+		[61, 156],
+		[122, 169],
+		[244, 160],
+		[245, 81],
+		[247, 11],
+		[243, 245],
+		[251, 22],
+		[235, 235],
+		[203, 122],
+		[139, 117],
+		[11, 44],
+		[22, 215],
+		[44, 79],
+		[88, 174],
+		[176, 213],
+		[125, 233],
+		[250, 230],
+		[233, 231],
+		[207, 173],
+		[131, 232],
+		[27, 116],
+		[54, 214],
+		[108, 244],
+		[216, 234],
+		[173, 168],
+		[71, 80],
+		[142, 88],
+		[1, 175],
+	],
+	log: function(n) {
+		//	calculate alpha notation
+		// let a = 1
+		// for (i = 1; i <= n; i++) {
+		// 	a *= 2
+		// 	if (a > 255) {
+		// 		a = a ^ 285
+		// 	}
+		// }
+		// return a
+
+		//	precalculated results
+		return this.data[n][0]
+	},
+	alog: function(n) {
+		//	precalculated results
+		return this.data[n][1]
+	}
+}
+
+class Matrix {
+	constructor(width, height, data = null) {
+		this.width = width
+		this.height = height
+		if (Array.isArray(data)) {
+			this.data = data
+		} else {
+			this.data = new Array(width * height).fill(data)
+		}
+	}
+	checkPos(pos) {
+		if (pos.col < 0 || pos.col >= this.width || pos.row < 0 || pos.row >= this.height) {
+			return undefined
+		}
+		return pos
+	}
+	pos2Index(col, row) {
+		if (!this.checkPos({ col, row })) {
+			return undefined
+		}
+		return row * this.width + col
+	}
+	index2Pos(index) {
+		const col = index % this.width
+		const row = Math.floor(index / this.width)
+		return this.checkPos({ col, row })
+	}
+	getValue(col, row) {
+		return this.data[this.pos2Index(col, row)]
+	}
+	setValue(col, row, value, overlap = true) {
+		const index = this.pos2Index(col, row)
+		if (index !== undefined) {
+			if (overlap || this.data[index] === null) {
+				this.data[index] = value
+				return value
+			}
+		}
+		return false
+	}
+	clone() {
+		return new Matrix(this.width, this.height, this.data.slice())
+	}
+	forEach(callback) {
+		this.data.forEach((value, index) => {
+			const pos = this.index2Pos(index)
+			callback(value, pos.col, pos.row, index)
+		})
+	}
+	map(callback) {
+		this.forEach((value, col, row, index) => {
+			this.data[index] = callback(value, col, row, index)
+		})
+	}
+	applyMatrix(colOffset, rowOffset, matrix) {
+		matrix.forEach((value, col, row) => {
+			this.setValue(col + colOffset, row + rowOffset, value)
+		})
+	}
+	matchMatrix(colOffset, rowOffset, matrix) {
+		for (let i = 0; i < matrix.data.length; i++) {
+			const pos = matrix.index2Pos(i)
+			if (this.getValue(pos.col + colOffset, pos.row + rowOffset) !== matrix.data[i]) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+class QRCode {
+	constructor(options) {
+		this.setOptions(options)
+		this.setCanvas()
+	}
+	setOptions(options = {}) {
+		//	Choose the Error Correction Level
+		this.ecLevel = options.ecLevel || "M"
+		this.qrCodeSize = options.qrCodeSize || 400
+	}
+	encode(string) {
+		this.message = string
+		//	Choose the Most Efficient Mode
+		this.mode = modeTable.detectMode(string)
+		//	Determine the Smallest Version for the Data
+		this.version = characterCapacitiesTable.getVersion(string.length, this.ecLevel, this.mode)
+		//	Add the Mode Indicator
+		this.modeIndicator = modeTable.getModeIndicator(this.mode)
+		//	Add the Character Count Indicator
+		this.lengthIndicator = modeTable.getCharacterCountIndicator(string.length, this.version, this.mode)
+		//	Add mode indicator and length indicator bytes at the beginning of encoded string
+		let encoded = this.modeIndicator + this.lengthIndicator
+		//	Encode Using the Selected Mode
+		switch (this.mode) {
+			case "numeric":
+				encoded += numericCodesTable.encode(string)
+				break
+			case "alphanumeric":
+				encoded += alphanumericCodesTable.encode(string)
+				break
+			case "byte":
+				encoded += byteCodesTable.encode(string)
+				break
+		}
+		//	Determine the Required Number of Bits for this QR Code
+		const codewordsBits = errorCorrectionTable.getData(this.version, this.ecLevel, "tc") * 8
+		//	Add a Terminator of 0s if Necessary
+		const terminatorBits = Math.min(codewordsBits - encoded.length, 4)
+		//	Add More 0s to Make the Length a Multiple of 8
+		let octetBits = 0
+		const octetTail = (encoded.length + terminatorBits) % 8
+		if (octetTail) {
+			octetBits = 8 - octetTail
+		}
+		// console.log({ codewordsBits, terminatorBits, octetBits, messageBits: encoded.length })
+		encoded += "0".repeat(terminatorBits + octetBits)
+		//	Add Pad Bytes if the String is Still too Short
+		const additionalBytes = ["11101100", "00010001"]
+		let index = 0
+		while (encoded.length < codewordsBits) {
+			encoded += additionalBytes[index]
+			index = index ? 0 : 1
+		}
+		return encoded
+	}
+	generatorPolynomial(n) {
+		//	(g(x) for n-1 error correction codewords) * (x - αn-1) = (g(x) for n error correction codewords)
+		let gp = [0, 0]
+		for (let i = 2; i <= n; i++) {
+			gp = this.mult(gp, [i - 1, 0])
+		}
+		return gp.reverse()
+	}
+	mod(a, mod = 255) {
+		if (a > mod) {
+			a %= mod
+		}
+		return a
+	}
+	xor(a, mod = 256) {
+		if (a.length === 1) {
+			return a[0]
+		}
+		let sum = 0
+		a.forEach(b => sum ^= logTable.log(b))
+		return logTable.alog(sum % mod)
+	}
+	mult(a, b) {
+		const c = {}
+		a.forEach((aValue, aIndex) => {
+			b.forEach((bValue, bIndex) => {
+				const cIndex = aIndex + bIndex
+				let cValue = this.mod(aValue + bValue)
+				if (typeof c[cIndex] === "undefined") {
+					c[cIndex] = [cValue]
+				} else {
+					c[cIndex].push(cValue)
+				}
+			})
+		})
+		const d = []
+		const total = Math.max(...Object.keys(c))
+		for (let i = 0; i <= total; i++) {
+			d[i] = c[i] ? this.xor(c[i]) : 0
+		}
+		return d
+	}
+	div(a, b) {
+		//	multiply polynomials by divident and divisor exponent respectively
+		let aa = a.concat(new Array(b.length - 1).fill(0))
+		let bb = b.concat(new Array(a.length - 1).fill(0))
+		for (let i = 0; i < a.length; i++) {
+			//	Multiply the divisor polynomial by the Lead Term of divident polinomial or the XOR result from the previous step
+			const term = logTable.alog(aa[0])
+			const c = []
+			for (let j = 0; j < bb.length; j++) {
+				c[j] = bb[j] ? logTable.log(this.mod(bb[j] + term)) : 0
+			}
+			//	XOR the result with the divident polinomial or result from the previous step
+			for (let k = 0; k < aa.length; k++) {
+				aa[k] = aa[k] ^ c[k]
+			}
+			//	Discard the lead 0 term
+			aa = aa.slice(1)
+		}
+		return aa
+	}
+	interleave(groups) {
+		let result = []
+		//	Get total blocks count in all groups
+		let allBlocksCount = 0
+		groups.forEach(group => allBlocksCount += group.length)
+		let allBlocksIndex = 0
+		groups.forEach((group, groupIndex) => {
+			group.forEach((block, blockIndex) => {
+				block.forEach((codeword, codewordIndex) => {
+					//	Index of a codeword in the one-dimensional interleaved array
+					const index = codewordIndex * allBlocksCount + allBlocksIndex
+					result[index] = codeword
+				})
+				//	Next block index
+				allBlocksIndex++
+			})
+		})
+		return result.filter(codeword => codeword)
+	}
+	mask(matrix, pattern) {
+		// Mask Number	If the formula below is true for a given row/column coordinate, switch the bit at that coordinate
+		// 0	(row + column) mod 2 == 0
+		// 1	(row) mod 2 == 0
+		// 2	(column) mod 3 == 0
+		// 3	(row + column) mod 3 == 0
+		// 4	( floor(row / 2) + floor(column / 3) ) mod 2 == 0
+		// 5	((row * column) mod 2) + ((row * column) mod 3) == 0
+		// 6	( ((row * column) mod 2) + ((row * column) mod 3) ) mod 2 == 0
+		// 7	( ((row + column) mod 2) + ((row * column) mod 3) ) mod 2 == 0
+		matrix.map((value, col, row) => {
+			if (this.layers.getValue(col, row) !== null) {
+				//	do not change functional modules
+				return value
+			}
+			let invert = false
+			switch (pattern) {
+				case 0:
+					invert = ((row + col) % 2 === 0)
+					break
+				case 1:
+					invert = ((row) % 2 === 0)
+					break
+				case 2:
+					invert = ((col) % 3 === 0)
+					break
+				case 3:
+					invert = ((row + col) % 3 === 0)
+					break
+				case 4:
+					invert = (( Math.floor(row / 2) + Math.floor(col / 3) ) % 2 === 0)
+					break
+				case 5:
+					invert = (((row * col) % 2) + ((row * col) % 3) === 0)
+					break
+				case 6:
+					invert = (( ((row * col) % 2) + ((row * col) % 3) ) % 2 === 0)
+					break
+				case 7:
+					invert = (( ((row + col) % 2) + ((row * col) % 3) ) % 2 === 0)
+					break
+			}
+			if (invert) {
+				value ^= 1
+			}
+			return value
+		})
+	}
+	updateModule(col, row, data, type = null, override = true) {
+		let updated = false
+		if (data instanceof Matrix) {
+			this.matrix.applyMatrix(col, row, data)
+			const mask = new Matrix(data.width, data.height, new Array(data.width * data.height).fill(type))
+			this.layers.applyMatrix(col, row, mask)
+			updated = true
+		} else {
+			if (this.matrix.setValue(col, row, Number(data), override) !== false) {
+				this.layers.setValue(col, row, type, override)
+				updated = true
+			}
+		}
+		return updated
+	}
+	createMatrix() {
+		this.matrixSize = codeVersionTable.getSize(this.version)
+		this.moduleSize = this.qrCodeSize / this.matrixSize
+		this.matrix = new Matrix(this.matrixSize, this.matrixSize)
+		this.layers = this.matrix.clone()
+
+		//	Add the Finder Patterns
+		const finder = new Matrix(9, 9, [
+			0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 1, 1, 1, 1, 1, 1, 0,
+			0, 1, 0, 0, 0, 0, 0, 1, 0,
+			0, 1, 0, 1, 1, 1, 0, 1, 0,
+			0, 1, 0, 1, 1, 1, 0, 1, 0,
+			0, 1, 0, 1, 1, 1, 0, 1, 0,
+			0, 1, 0, 0, 0, 0, 0, 1, 0,
+			0, 1, 1, 1, 1, 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0,
+		])
+		//	Apply finder patterns to matrix corners
+		this.updateModule(-1, -1, finder, 1)
+		this.updateModule(-1, this.matrixSize - finder.width + 1, finder, 1)
+		this.updateModule(this.matrixSize - finder.height + 1, -1, finder, 1)
+
+		//	Add the Alignment Patterns and mask
+		const alignment = new Matrix(5, 5, [
+			1, 1, 1, 1, 1,
+			1, 0, 0, 0, 1,
+			1, 0, 1, 0, 1,
+			1, 0, 0, 0, 1,
+			1, 1, 1, 1, 1,
+		])
+		//	The locations at which the alignment patterns must be placed are defined in the alignment pattern locations table.
+		const alignmentPositions = codeVersionTable.getAlignmentPos(this.version)
+		alignmentPositions.forEach(col => {
+			alignmentPositions.forEach(row => {
+				//	Alignment patterns MUST NOT overlap the finder patterns or separators.
+				if (this.matrix.getValue(col, row) === null) {
+					this.updateModule(col - 2, row - 2, alignment, 2)
+				}
+			})
+		})
+		//	Add the Timing Patterns
+		for (let i = 6; i < this.matrixSize - 6; i++) {
+			this.updateModule(i, 6, (i + 1) % 2, 3, false)
+			this.updateModule(6, i, (i + 1) % 2, 3, false)
+		}
+		//	Add the Dark Module beside the bottom left finder pattern
+		this.updateModule(8, 4 * this.version + 9, 1, 4)
+		//	Add Reserved Areas beside the finder separators 
+		for (let i = 0; i < 9; i++) {
+			this.updateModule(8, i, 0, 5, false)
+			this.updateModule(i, 8, 0, 5, false)
+			this.updateModule(this.matrixSize - i, 8, 0, 5, false)
+			this.updateModule(8, this.matrixSize - i, 0, 5, false)
+		}
+		//	Reserve the Version Information Area for QR codes with versions 7 and larger
+		if (this.version > 6) {
+			for (let i = 0; i < 3; i++) {
+				for (let j = 0; j < 6; j++) {
+					this.updateModule(this.matrixSize - 9 - i, j, 0, 6)
+					this.updateModule(j, this.matrixSize - 9 - i, 0, 6)
+				}
+			}
+		}
+		//	Place the Data Bits
+		let msgIndex = 0
+		const cols2 = (this.matrixSize - 1) / 2
+		for (let col2 = cols2; col2 >= 0; col2--) {
+			//	 When the vertical timing pattern is reached, always start the next column to the left of it. No column should ever overlap the vertical timing pattern.
+			let col = (col2 > 3) ? col2 * 2 : col2 * 2 - 1
+			for (let row2 = 0; row2 < this.matrixSize; row2++) {
+				//	The data bits are placed starting at the bottom-right of the matrix and proceeding upward in a column that is 2 modules wide. When the column reaches the top, the next 2-module column starts immediately to the left of the previous column and continues downward.
+				let row = (col2 % 2) ? row2 : this.matrixSize - row2 - 1
+				//	When a function pattern is encountered, skip any occupied modules until you reach the next unused module.
+				for (let i = 0; i < 2; i++) {
+					if (this.updateModule(col - i, row, this.final[msgIndex], null, false)) {
+						msgIndex++
+					}
+				}
+			}
+		}
+	}
+	getPenalty(matrix) {
+		let penalty = 0
+		//	The first rule gives the QR code a penalty for each group of five or more same-colored modules in a row (or column).
+		for (let i = 0; i < matrix.width; i++) {
+			let cols = 0
+			let rows = 0
+			let colPrev, rowPrev
+			for (let j = 0; j < matrix.height; j++) {
+				let colValue = matrix.getValue(i, j)	//	cols
+				let rowValue = matrix.getValue(j, i)	//	rows
+				if (colPrev !== colValue) {
+					cols = 0
+				}
+				if (rowPrev !== rowValue) {
+					rows = 0
+				}
+				colPrev = colValue
+				rowPrev = rowValue
+				cols++
+				rows++
+				if (cols === 5) {
+					penalty += 3
+				} else if (cols > 5) {
+					penalty += 1
+				}
+				if (rows === 5) {
+					penalty += 3
+				} else if (rows > 5) {
+					penalty += 1
+				}
+			}
+		}
+		//	The second rule gives the QR code a penalty for each 2x2 area of same-colored modules in the matrix.
+		const squares = [
+			new Matrix(2, 2, [0, 0, 0, 0]),
+			new Matrix(2, 2, [1, 1, 1, 1])
+		]
+		matrix.forEach((value, col, row) => {
+			squares.forEach(square => {
+				if (this.matrix.matchMatrix(col, row, square)) {
+					penalty += 3
+				}
+			})
+		})
+		//	The third rule gives the QR code a large penalty if there are patterns that look similar to the finder patterns.
+		const finders = [
+			new Matrix(1, 11, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]),
+			new Matrix(1, 11, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]),
+			new Matrix(11, 1, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]),
+			new Matrix(11, 1, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]),
+		]
+		matrix.forEach((value, col, row) => {
+			finders.forEach(finder => {
+				if (this.matrix.matchMatrix(col, row, finder)) {
+					penalty += 40
+				}
+			})
+		})
+		//	The fourth rule gives the QR code a penalty if more than half of the modules are dark or light, with a larger penalty for a larger difference.
+		//	The final evaluation condition is based on the ratio of light modules to dark modules. To calculate this penalty rule, do the following steps:
+		//	1. Count the total number of modules in the matrix.
+		//	2. Count how many dark modules there are in the matrix.
+		const modules = [0, 0]
+		matrix.forEach(value => {
+			modules[value]++
+		})
+		//	3. Calculate the percent of modules in the matrix that are dark: (darkmodules / totalmodules) * 100
+		const darkModulesPercent = modules[1] / (modules[0] + modules[1]) * 100
+		//	4. Determine the previous and next multiple of five of this percent. For example, for 43 percent, the previous multiple of five is 40, and the next multiple of five is 45.
+		const dmpt = darkModulesPercent * 0.2
+		const darkModulesPercentPrev = Math.floor(dmpt) / 0.2
+		const darkModulesPercentNext = Math.ceil(dmpt) / 0.2
+		//	5. Subtract 50 from each of these multiples of five and take the absolute value of the result. For example, |40 - 50| = |-10| = 10 and |45 - 50| = |-5| = 5.
+		//	6. Divide each of these by five. For example, 10/5 = 2 and 5/5 = 1.
+		const darkModulesAbsPrevDiff = Math.abs(darkModulesPercentPrev - 50) / 5
+		const darkModulesAbsNextDiff = Math.abs(darkModulesPercentNext - 50) / 5
+		//	7. Finally, take the smallest of the two numbers and multiply it by 10. In this example, the lower number is 1, so the result is 10. This is penalty score #4.
+		penalty += Math.min(darkModulesAbsPrevDiff, darkModulesAbsNextDiff) * 10
+		return penalty
+	}
+	setCanvas() {
+		this.cnv = document.createElement("canvas")
+		this.cnv.width = this.qrCodeSize
+		this.cnv.height = this.qrCodeSize
+		this.ctx = this.cnv.getContext("2d")
+		document.body.appendChild(this.cnv)
+		this.colors = ["#fff", "#000", "#646464", "red", "green", "blue", "magenta", "cyan", "orange", "purple"]
+		this.ctx.fillStyle = this.colors[2]
+		this.ctx.fillRect(0, 0, this.cnv.width, this.cnv.height)
+	}
+	drawModule(col, row, value) {
+		this.ctx.fillStyle = this.colors[value] || this.colors[2]
+		this.ctx.fillRect(col * this.moduleSize, row * this.moduleSize, this.moduleSize, this.moduleSize)
+	}
+	drawMatrix(matrix) {
+		matrix = matrix || this.matrix
+		matrix.forEach((value, col, row) => {
+			this.drawModule(col, row, value)
+		})
+	}
+	drawMask() {
+		this.layers.forEach((value, col, row) => {
+			value = value || 0
+			this.ctx.fillStyle = this.colors[value + 2]
+			this.ctx.fillRect(col * this.moduleSize, row * this.moduleSize, this.moduleSize, this.moduleSize)
+		})
+	}
+	generate(string) {
+		//	Encode string to message codewords
+		this.messageEncoded = this.encode(string)
+		//	Break Up into 8-bit Codewords
+		const codewords = bin2DecAll(this.messageEncoded.match(/.{1,8}/g))
+
+		this.codewordsOptions = errorCorrectionTable.getData(this.version, this.ecLevel)
+		//	Split message codewords to groups and blocks according to error correction table
+		this.codewords = []
+		//	Get total group count from options
+		const totalGroups = this.codewordsOptions.cb2 ? 2 : 1
+		for (let groupIndex = 0; groupIndex < totalGroups; groupIndex++) {
+			this.codewords[groupIndex] = []
+			const groupNumber = groupIndex + 1
+			//	Get total blocks count from options
+			const totalBlocks = this.codewordsOptions[`b${groupNumber}`]
+			//	Get codewords count per block from options
+			const totalCodewords = this.codewordsOptions[`cb${groupNumber}`]
+			for (let blockIndex = 0; blockIndex < totalBlocks; blockIndex++) {
+				this.codewords[groupIndex].push(codewords.splice(0, totalCodewords))
+			}
+		}
+		//	Generating Error Correction Codewords
+		this.gp = this.generatorPolynomial(this.codewordsOptions.ecb)
+		this.correction = []
+		this.codewords.forEach((group, groupIndex) => {
+			this.correction[groupIndex] = []
+			group.forEach((block, blockIndex) => {
+				this.correction[groupIndex][blockIndex] = this.div(block, this.gp)
+			})
+		})
+		//	Interleave the Blocks
+		this.codewordsInterleaved = this.interleave(this.codewords)
+		this.correctionInterleaved = this.interleave(this.correction)
+		//	Сoncat codewords to final code
+		this.final = this.codewordsInterleaved.concat(this.correctionInterleaved)
+		//	Convert to 8bit binary
+		this.final = dec2BinAll(this.final)
+		this.final = this.final.join("")
+		//	Add reminder bits for specific version
+		const reminderBits = codeVersionTable.getReminderBits(this.version)
+		if (reminderBits) {
+			this.final += "0".repeat(reminderBits)
+		}
+		//	Place modules to the matrix
+		this.createMatrix()
+		//	Determining the Best Mask
+		this.bestMask = 0
+		let bestPenalty = Infinity
+		for (let i = 0; i < 8; i++) {
+			const clone = this.matrix.clone()
+			this.mask(clone, i)
+			const penalty = this.getPenalty(clone)
+			if (penalty < bestPenalty) {
+				bestPenalty = penalty
+				this.bestMask = i
+				this.matrix = clone
+			}
+		}
+		//	Format and Version Information
+		const formatCode = formatInformationTable.getFormatCode(this.ecLevel, this.bestMask)
+		const versionCode = versionInformationTable.getVersionCode(this.version)
+		for (let i = 0; i < 15; i++) {
+			if (i < 7) {
+				this.updateModule(8, this.matrixSize - 1 - i, formatCode[i], 7, true)
+			} else if (i < 9) {
+				this.updateModule(8, 15 - i, formatCode[i], 7, true)
+			} else {
+				this.updateModule(8, 14 - i, formatCode[i], 7, true)
+			}
+			if (i < 6) {
+				this.updateModule(i, 8, formatCode[i], 7, true)
+			} else if (i < 7) {
+				this.updateModule(i + 1, 8, formatCode[i], 7, true)
+			} else {
+				this.updateModule(this.matrixSize - i + 6, 8, formatCode[i], 7, true)
+			}
+		}
+		if (this.version > 6 && versionCode) {
+			const versionMatrix = new Matrix(3, 6, versionCode.split("").reverse())
+			versionMatrix.forEach((value, col, row) => {
+				console.log(col + this.matrixSize - 11, row, value)
+				console.log(row, col + this.matrixSize - 11, value)
+				this.updateModule(col + this.matrixSize - 11, row, value)
+				this.updateModule(row, col + this.matrixSize - 11, value)
+			})
+		}
+		this.drawMatrix()
+		// this.drawMask()
+		console.log(this)
+	}
+}
+const timer = ms => new Promise(res => setTimeout(res, ms))
+
+const QR = new QRCode()
+// QR.generate("89069509078")
+QR.generate("HELLO WORLD")
+// QR.setOptions({
+// 	ecLevel: "Q"
+// })
+// QR.generate("There\\'s a frood who really knows where his towel is.")
+// QR.generate("https://cloud.digitalocean.com/projects/5f2597d3-3d21-43a3-9705-e3099cc238eb/resources?i=3c60ef")
+
+// decode codewords
+// console.log("0101010001101000011001010111001001100101010111000010011101110011001000000110000100100000011001100111001001101111011011110110010000100000011101110110100001101111001000000111001001100101011000010110110001101100011110010010000001101011011011100110111101110111011100110010000001110111011010000110010101110010011001010010000001101000011010010111001100100000011101000110111101110111011001010110110000100000011010010111001100101110000011101100000100011110110000010001111011000001000111101100".match(/.{1,8}/g).map(code => console.log(String.fromCharCode(bin2Dec(code)))).join(""))
+
+	</script>
+</body>
+</html>
