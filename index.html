@@ -34,6 +34,7 @@
 	</select>
 	<textarea id="text" rows="4">There\'s a frood who really knows where his towel is.</textarea>
 	<pre id="info"></pre>
+	<a href="https://www.thonky.com/qr-code-tutorial/">tutorial</a>
 
 <script type="text/javascript">
 
@@ -1412,6 +1413,10 @@ class QRCode {
 				}
 			}
 		}
+		if (msgIndex !== this.final.length) {
+			console.log(this)
+			throw new Error(`Final message bits length mismatch: ${msgIndex} from ${this.final.length}`)
+		}
 	}
 	getPenalty(matrix) {
 		let penalty = 0
@@ -1525,7 +1530,6 @@ class QRCode {
 		this.messageEncoded = this.encode(string)
 		//	Break Up into 8-bit Codewords
 		const codewords = bin2DecAll(this.messageEncoded.match(/.{1,8}/g))
-
 		this.codewordsOptions = errorCorrectionTable.getData(this.version, this.ecLevel)
 		//	Split message codewords to groups and blocks according to error correction table
 		this.codewords = []
@@ -1579,6 +1583,8 @@ class QRCode {
 					this.matrix = clone
 				}
 			}
+		} else {
+			this.mask(this.matrix, this.maskPattern)
 		}
 		//	Format and Version Information
 		const formatCode = formatInformationTable.getFormatCode(this.ecLevel, this.maskPattern)
@@ -1602,8 +1608,6 @@ class QRCode {
 		if (this.version > 6 && versionCode) {
 			const versionMatrix = new Matrix(3, 6, versionCode.split("").reverse())
 			versionMatrix.forEach((value, col, row) => {
-				console.log(col + this.matrixSize - 11, row, value)
-				console.log(row, col + this.matrixSize - 11, value)
 				this.updateModule(col + this.matrixSize - 11, row, value)
 				this.updateModule(row, col + this.matrixSize - 11, value)
 			})
@@ -1618,7 +1622,7 @@ const QR = new QRCode()
 function showQRCode() {
 	const text = document.getElementById("text").value
 	const ecLevel = document.getElementById("ecLevel").value
-	const mask = document.getElementById("mask").value
+	const mask = Number(document.getElementById("mask").value)
 	QR.setOptions({	ecLevel, mask })
 	QR.generate(text)
 	report()
