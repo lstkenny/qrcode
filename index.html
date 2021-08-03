@@ -8,9 +8,33 @@
 		canvas {
 			margin: 100px;
 		}
+		#text {
+			width: 100%;
+		}
 	</style>
 </head>
 <body>
+	<div id="qr"></div>
+	<select id="ecLevel">
+		<option value="L">L</option>
+		<option value="M" selected="selected">M</option>
+		<option value="Q">Q</option>
+		<option value="H">H</option>
+	</select>
+	<select id="mask">
+		<option value="auto">auto</option>
+		<option value="0">0</option>
+		<option value="1">1</option>
+		<option value="2">2</option>
+		<option value="3">3</option>
+		<option value="4">4</option>
+		<option value="5">5</option>
+		<option value="6">6</option>
+		<option value="7">7</option>
+	</select>
+	<textarea id="text" rows="4">There\'s a frood who really knows where his towel is.</textarea>
+	<pre id="info"></pre>
+
 <script type="text/javascript">
 
 const bin2Dec = function(bin) {
@@ -1115,7 +1139,8 @@ class QRCode {
 	setOptions(options = {}) {
 		//	Choose the Error Correction Level
 		this.ecLevel = options.ecLevel || "M"
-		this.qrCodeSize = options.qrCodeSize || 400
+		this.maskPattern = options.mask || "auto"
+		this.qrCodeSize = options.qrCodeSize || 200
 	}
 	encode(string) {
 		this.message = string
@@ -1473,7 +1498,7 @@ class QRCode {
 		this.cnv.width = this.qrCodeSize
 		this.cnv.height = this.qrCodeSize
 		this.ctx = this.cnv.getContext("2d")
-		document.body.appendChild(this.cnv)
+		document.getElementById("qr").appendChild(this.cnv)
 		this.colors = ["#fff", "#000", "#646464", "red", "green", "blue", "magenta", "cyan", "orange", "purple"]
 		this.ctx.fillStyle = this.colors[2]
 		this.ctx.fillRect(0, 0, this.cnv.width, this.cnv.height)
@@ -1542,20 +1567,21 @@ class QRCode {
 		//	Place modules to the matrix
 		this.createMatrix()
 		//	Determining the Best Mask
-		this.bestMask = 0
-		let bestPenalty = Infinity
-		for (let i = 0; i < 8; i++) {
-			const clone = this.matrix.clone()
-			this.mask(clone, i)
-			const penalty = this.getPenalty(clone)
-			if (penalty < bestPenalty) {
-				bestPenalty = penalty
-				this.bestMask = i
-				this.matrix = clone
+		if (this.maskPattern === "auto") {
+			let bestPenalty = Infinity
+			for (let i = 0; i < 8; i++) {
+				const clone = this.matrix.clone()
+				this.mask(clone, i)
+				const penalty = this.getPenalty(clone)
+				if (penalty < bestPenalty) {
+					bestPenalty = penalty
+					this.maskPattern = i
+					this.matrix = clone
+				}
 			}
 		}
 		//	Format and Version Information
-		const formatCode = formatInformationTable.getFormatCode(this.ecLevel, this.bestMask)
+		const formatCode = formatInformationTable.getFormatCode(this.ecLevel, this.maskPattern)
 		const versionCode = versionInformationTable.getVersionCode(this.version)
 		for (let i = 0; i < 15; i++) {
 			if (i < 7) {
@@ -1584,22 +1610,46 @@ class QRCode {
 		}
 		this.drawMatrix()
 		// this.drawMask()
-		console.log(this)
 	}
 }
-const timer = ms => new Promise(res => setTimeout(res, ms))
 
 const QR = new QRCode()
-// QR.generate("89069509078")
-QR.generate("HELLO WORLD")
-// QR.setOptions({
-// 	ecLevel: "Q"
-// })
-// QR.generate("There\\'s a frood who really knows where his towel is.")
-// QR.generate("https://cloud.digitalocean.com/projects/5f2597d3-3d21-43a3-9705-e3099cc238eb/resources?i=3c60ef")
 
-// decode codewords
-// console.log("0101010001101000011001010111001001100101010111000010011101110011001000000110000100100000011001100111001001101111011011110110010000100000011101110110100001101111001000000111001001100101011000010110110001101100011110010010000001101011011011100110111101110111011100110010000001110111011010000110010101110010011001010010000001101000011010010111001100100000011101000110111101110111011001010110110000100000011010010111001100101110000011101100000100011110110000010001111011000001000111101100".match(/.{1,8}/g).map(code => console.log(String.fromCharCode(bin2Dec(code)))).join(""))
+function showQRCode() {
+	const text = document.getElementById("text").value
+	const ecLevel = document.getElementById("ecLevel").value
+	const mask = document.getElementById("mask").value
+	QR.setOptions({	ecLevel, mask })
+	QR.generate(text)
+	report()
+}
+
+function report() {
+	const infoBlock = document.getElementById("info")
+	let info = {
+		"error correction": QR.ecLevel,
+		"message": QR.message,
+		"mode": QR.mode,
+		"version": QR.version,
+		"modeIndicator": QR.modeIndicator,
+		"lengthIndicator": QR.lengthIndicator,
+		"messageEncoded": QR.messageEncoded,
+		"codewords": QR.codewords.map(a => a.map(b => b.join(",")).join(",")).join(","),
+		"gp": QR.gp.join(","),
+		"correction": QR.correction.map(a => a.map(b => b.join(",")).join(",")).join(","),
+		"codewordsInterleaved": QR.codewordsInterleaved.join(","),
+		"correctionInterleaved": QR.correctionInterleaved.join(","),
+		"final": QR.final,
+		"matrixSize": QR.matrixSize,
+		"maskPattern": QR.maskPattern
+	}
+	infoBlock.textContent = JSON.stringify(info, null, "\t")
+}
+
+document.getElementById("text").addEventListener("input", showQRCode)
+document.getElementById("ecLevel").addEventListener("input", showQRCode)
+document.getElementById("mask").addEventListener("input", showQRCode)
+showQRCode()
 
 	</script>
 </body>
