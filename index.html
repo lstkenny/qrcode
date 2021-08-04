@@ -31,6 +31,7 @@
 		<option value="5">5</option>
 		<option value="6">6</option>
 		<option value="7">7</option>
+		<option value="none">none</option>
 	</select>
 	<textarea id="text" rows="4">There\'s a frood who really knows where his towel is.</textarea>
 	<pre id="info"></pre>
@@ -1337,7 +1338,6 @@ class QRCode {
 		this.moduleSize = this.qrCodeSize / this.matrixSize
 		this.matrix = new Matrix(this.matrixSize, this.matrixSize)
 		this.layers = this.matrix.clone()
-
 		//	Add the Finder Patterns
 		const finder = new Matrix(9, 9, [
 			0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1408,6 +1408,7 @@ class QRCode {
 				//	When a function pattern is encountered, skip any occupied modules until you reach the next unused module.
 				for (let i = 0; i < 2; i++) {
 					if (this.updateModule(col - i, row, this.final[msgIndex], null, false)) {
+						// console.log(msgIndex, this.final[msgIndex], col -i, row)
 						msgIndex++
 					}
 				}
@@ -1583,28 +1584,30 @@ class QRCode {
 					this.matrix = clone
 				}
 			}
-		} else {
-			this.mask(this.matrix, this.maskPattern)
+		} else if (this.maskPattern !== "none") {
+			this.mask(this.matrix, Number(this.maskPattern))
 		}
 		//	Format and Version Information
 		const formatCode = formatInformationTable.getFormatCode(this.ecLevel, this.maskPattern)
-		const versionCode = versionInformationTable.getVersionCode(this.version)
-		for (let i = 0; i < 15; i++) {
-			if (i < 7) {
-				this.updateModule(8, this.matrixSize - 1 - i, formatCode[i], 7, true)
-			} else if (i < 9) {
-				this.updateModule(8, 15 - i, formatCode[i], 7, true)
-			} else {
-				this.updateModule(8, 14 - i, formatCode[i], 7, true)
-			}
-			if (i < 6) {
-				this.updateModule(i, 8, formatCode[i], 7, true)
-			} else if (i < 7) {
-				this.updateModule(i + 1, 8, formatCode[i], 7, true)
-			} else {
-				this.updateModule(this.matrixSize - i + 6, 8, formatCode[i], 7, true)
+		if (formatCode) {
+			for (let i = 0; i < 15; i++) {
+				if (i < 7) {
+					this.updateModule(8, this.matrixSize - 1 - i, formatCode[i], 7, true)
+				} else if (i < 9) {
+					this.updateModule(8, 15 - i, formatCode[i], 7, true)
+				} else {
+					this.updateModule(8, 14 - i, formatCode[i], 7, true)
+				}
+				if (i < 6) {
+					this.updateModule(i, 8, formatCode[i], 7, true)
+				} else if (i < 7) {
+					this.updateModule(i + 1, 8, formatCode[i], 7, true)
+				} else {
+					this.updateModule(this.matrixSize - 15 + i, 8, formatCode[i], 7, true)
+				}
 			}
 		}
+		const versionCode = versionInformationTable.getVersionCode(this.version)
 		if (this.version > 6 && versionCode) {
 			const versionMatrix = new Matrix(3, 6, versionCode.split("").reverse())
 			versionMatrix.forEach((value, col, row) => {
@@ -1622,10 +1625,11 @@ const QR = new QRCode()
 function showQRCode() {
 	const text = document.getElementById("text").value
 	const ecLevel = document.getElementById("ecLevel").value
-	const mask = Number(document.getElementById("mask").value)
+	const mask = document.getElementById("mask").value
 	QR.setOptions({	ecLevel, mask })
 	QR.generate(text)
 	report()
+	// console.log(QR)
 }
 
 function report() {
