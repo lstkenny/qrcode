@@ -1,13 +1,13 @@
-import { bin2DecAll, dec2BinAll } from "./binary"
-import encodeText from "./encodeText"
-import characterCapacitiesTable from "./characterCapacitiesTable"
-import modesTable from "./modesTable"
-import errorCorrectionTable from "./errorCorrectionTable"
-import polynomialTable from "./polynomialTable"
-import codeVersionTable from "./codeVersionTable"
-import formatInformationTable from "./formatInformationTable"
-import versionInformationTable from "./versionInformationTable"
-import Matrix from "./matrix"
+import { bin2DecAll, dec2BinAll } from "./binary.js"
+import encodeText from "./encodeText.js"
+import characterCapacitiesTable from "./characterCapacitiesTable.js"
+import modesTable from "./modesTable.js"
+import errorCorrectionTable from "./errorCorrectionTable.js"
+import polynomialTable from "./polynomialTable.js"
+import codeVersionTable from "./codeVersionTable.js"
+import formatInformationTable from "./formatInformationTable.js"
+import versionInformationTable from "./versionInformationTable.js"
+import Matrix from "./matrix.js"
 
 function encodeMessage(message, ecLevel) {
 	//	encode message and detect message mode
@@ -46,6 +46,7 @@ function encodeMessage(message, ecLevel) {
 }
 
 function groupCodewords(codewords, codewordsOptions) {
+	codewords = codewords.slice()
 	const codewordsGroup = []
 	//	Get total group count from options
 	const totalGroups = codewordsOptions.cb2 ? 2 : 1
@@ -247,6 +248,25 @@ function createMatrix({ version, codeBlock }) {
 }
 
 function isFunctionalModule(matrix, col, row) {
+	//	finder module
+	if ((col < 8 && row < 8) || (col < 8 && row >= matrix.height - 8) || (col >= matrix.width - 8 && row >= matrix.height - 8)) {
+		return true
+	}
+	//	timing
+	if (col === 6 || row === 6) {
+		return true
+	}
+	//	 dark module
+	if (col === 9 && row === matrix.height - 8) {
+		return true
+	}
+	//	alignment !!!TODO
+	// 1 - 21
+	// 2 - 25
+	// 3 - 29
+	// 4 - 31
+	// 5 - 37
+	// const alignmentPositions = codeVersionTable.getAlignmentPos(version)
 	return false
 }
 
@@ -386,9 +406,11 @@ function applyMask(matrix, maskPattern) {
 	if (maskPattern === "auto") {
 		let bestPenalty = Infinity
 		for (let i = 0; i < 8; i++) {
-			const clone = matrix.clone()
-			mask(clone, i)
+			let clone = matrix.clone()
+			applyFormatInformation(clone, formatInformationTable.getFormatCode(ecLevel, i))
+			clone = mask(clone, i)
 			const penalty = getPenalty(clone)
+			console.log(i, penalty)
 			if (penalty < bestPenalty) {
 				bestPenalty = penalty
 				maskPattern = i
@@ -396,9 +418,9 @@ function applyMask(matrix, maskPattern) {
 			}
 		}
 	} else if (maskPattern !== "none") {
-		mask(matrix, Number(maskPattern))
+		matrix = mask(matrix, Number(maskPattern))
 	}
-
+	return { matrix, maskPattern }
 }
 
 function generate(message, options) {
@@ -415,13 +437,12 @@ function generate(message, options) {
 	//	Get final code bits
 	const codeBlock = createCodeBlock(codewordsInterleaved, correctionInterleaved, codeVersionTable.getReminderBits(version))
 	//	Place modules to the matrix
-	let matrix = createMatrix({ version, codeBlock })
+	const rawMatrix = createMatrix({ version, codeBlock })
+	//	Apply version information
+	applyVersionInformation(rawMatrix, versionInformationTable.getVersionCode(version))
 	//	Apply mask
-	const maskPattern = options.maskPattern || "auto"
-	applyMask(matrix, maskPattern)
-	//	Format and Version Information
-	applyFormatInformation(matrix, formatInformationTable.getFormatCode(ecLevel, maskPattern))
-	applyVersionInformation(matrix, versionInformationTable.getVersionCode(version))
+	const { matrix, maskPattern } = applyMask(rawMatrix, options.maskPattern || "auto", ecLevel)
+	console.log({ ecLevel, mode, version, codewords, codewordsOptions, codewordsGroup, correctionGroup, codeBlock, maskPattern, matrix })
 	return matrix
 }
 
@@ -448,6 +469,9 @@ function drawMatrix(matrix) {
 
 function showQRCode() {
 	const text = document.getElementById("text").value
+	if (!text) {
+		return
+	}
 	const ecLevel = document.getElementById("ecLevel").value
 	const mask = document.getElementById("mask").value
 	drawMatrix(generate(text, { ecLevel, mask }))
@@ -459,5 +483,13 @@ const colors = ["#fff", "#000", "#646464", "red", "green", "blue", "magenta", "c
 document.getElementById("text").addEventListener("input", showQRCode)
 document.getElementById("ecLevel").addEventListener("input", showQRCode)
 document.getElementById("mask").addEventListener("input", showQRCode)
+document.querySelectorAll('a[data-type="preset"]').forEach(preset => {
+	preset.addEventListener("click", e => {
+		document.getElementById("text").value = e.target.dataset.text || ""
+		document.getElementById("ecLevel").value = e.target.dataset.eclevel || "M"
+		document.getElementById("mask").value = e.target.dataset.mask || "auto"
+		showQRCode()
+	})
+})
 
 showQRCode()

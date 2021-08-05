@@ -1,4 +1,4 @@
-import modesTable from "./modesTable"
+import modesTable from "./modesTable.js"
 /* 
 	Character capacities table
 	Version	(0-40)

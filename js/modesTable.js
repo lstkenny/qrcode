@@ -1,4 +1,4 @@
-import { dec2Bin } from "./binary"
+import { dec2Bin } from "./binary.js"
 /*
 	Mode indicator table
 	Mode Name	Mode Indicator

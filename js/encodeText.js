@@ -1,5 +1,5 @@
-import { dec2Bin } from "./binary"
-import modesTable from "./modesTable"
+import { dec2Bin } from "./binary.js"
+import modesTable from "./modesTable.js"
 
 function encodeNumeric(str) {
 	//	Break up into groups of 3
@@ -44,18 +44,18 @@ function encodeBytes(string) {
 export default function encodeText(message) {
 	//	Choose the Most Efficient Mode
 	const mode = modesTable.detectMode(message)
-	let encoded
+	let encodedText
 	//	Encode Using the Selected Mode
 	switch (mode) {
 		case "numeric":
-			encoded = encodeNumeric(message)
+			encodedText = encodeNumeric(message)
 			break
 		case "alphanumeric":
-			encoded = encodeAlphanumeric(message)
+			encodedText = encodeAlphanumeric(message)
 			break
 		case "byte":
-			encoded = encodeBytes(message)
+			encodedText = encodeBytes(message)
 			break
 	}
-	return { mode, encoded }
+	return { mode, encodedText }
 }
