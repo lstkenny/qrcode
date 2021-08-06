@@ -49,6 +49,9 @@ class CodeVersionTable {
 	getSize(version) {
 		return version * 4 + 17
 	}
+	getVersion(size) {
+		return (size - 17) / 4
+	}
 	getReminderBits(version) {
 		return this.remainderBits[version] || 0
 	}

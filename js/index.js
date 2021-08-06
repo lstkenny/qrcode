@@ -66,6 +66,7 @@ function groupCodewords(codewords, codewordsOptions) {
 
 function getCorrectionCodewordsGroup(codewordsGroup, codewordsOptions) {
 	const gp = polynomialTable.generatorPolynomial(codewordsOptions.ecb)
+	console.log(gp.join(","))
 	const correctionGroup = []
 	codewordsGroup.forEach((group, groupIndex) => {
 		correctionGroup[groupIndex] = []
@@ -247,30 +248,64 @@ function createMatrix({ version, codeBlock }) {
 	return matrix
 }
 
+function alignmentPosMatch(coords, pos, interval = 2) {
+	for (let i = 0; i < coords.length; i++) {
+		if (pos >= (coords[i] - interval) && pos <= (coords[i] + interval)) {
+			return true
+		}
+	}
+	return false
+}
+
 function isFunctionalModule(matrix, col, row) {
 	//	finder module
-	if ((col < 8 && row < 8) || (col < 8 && row >= matrix.height - 8) || (col >= matrix.width - 8 && row >= matrix.height - 8)) {
+	if (
+		(col < 8 && row < 8) || //	top left
+		(col < 8 && row >= matrix.height - 8) || //	bottom left
+		(col >= matrix.width - 8 && row < 8) //	top right
+	) {
 		return true
 	}
 	//	timing
 	if (col === 6 || row === 6) {
 		return true
 	}
-	//	 dark module
-	if (col === 9 && row === matrix.height - 8) {
+	//	format info && dark module
+	if (
+		(col === 8 && row <= 8) ||
+		(col === 8 && row >= matrix.height - 8) ||
+		(row === 8 && col <= 8) ||
+		(row === 8 && col >= matrix.width - 8)
+	) {
 		return true
 	}
-	//	alignment !!!TODO
-	// 1 - 21
-	// 2 - 25
-	// 3 - 29
-	// 4 - 31
-	// 5 - 37
-	// const alignmentPositions = codeVersionTable.getAlignmentPos(version)
+	//	version info
+	if (matrix.height >= codeVersionTable.getSize(7)) {
+		if (
+			(col > matrix.width - 12 && col < matrix.width - 8 && row < 6) ||
+			(row > matrix.height - 12 && row < matrix.height - 8 && col < 6)
+		) {
+			return true
+		}
+	}
+	//	alignment
+	if (matrix.height >= codeVersionTable.getSize(2)) {
+		const alignmentPositions = codeVersionTable.getAlignmentPos(codeVersionTable.getVersion(matrix.height))
+		if (alignmentPosMatch(alignmentPositions, col) && alignmentPosMatch(alignmentPositions, row)) {
+			if (
+				(row === matrix.height - 9 && col < 9 && col > 3) ||
+				(col === matrix.width - 9 && row < 9 && row > 3)
+			) {
+				//	bottom left && top right finder overlapping alignment pattern exception
+				return false
+			}
+			return true
+		}
+	}
 	return false
 }
 
-function mask(matrix, pattern) {
+function mask(matrix, pattern, ecLevel) {
 	// Mask Number	If the formula below is true for a given row/column coordinate, switch the bit at that coordinate
 	// 0	(row + column) mod 2 == 0
 	// 1	(row) mod 2 == 0
@@ -280,7 +315,8 @@ function mask(matrix, pattern) {
 	// 5	((row * column) mod 2) + ((row * column) mod 3) == 0
 	// 6	( ((row * column) mod 2) + ((row * column) mod 3) ) mod 2 == 0
 	// 7	( ((row + column) mod 2) + ((row * column) mod 3) ) mod 2 == 0
-	matrix.clone().map((value, col, row) => {
+	matrix = matrix.clone()
+	matrix.map((value, col, row) => {
 		if (isFunctionalModule(matrix, col, row)) {
 			//	do not change functional modules
 			return value
@@ -317,6 +353,7 @@ function mask(matrix, pattern) {
 		}
 		return value
 	})
+	applyFormatInformation(matrix, formatInformationTable.getFormatCode(ecLevel, pattern))
 	return matrix
 }
 
@@ -401,16 +438,13 @@ function getPenalty(matrix) {
 	return penalty
 }
 
-function applyMask(matrix, maskPattern) {
+function applyMask(matrix, maskPattern, ecLevel) {
 	//	Determining the Best Mask
 	if (maskPattern === "auto") {
 		let bestPenalty = Infinity
 		for (let i = 0; i < 8; i++) {
-			let clone = matrix.clone()
-			applyFormatInformation(clone, formatInformationTable.getFormatCode(ecLevel, i))
-			clone = mask(clone, i)
+			let clone = mask(matrix.clone(), i, ecLevel)
 			const penalty = getPenalty(clone)
-			console.log(i, penalty)
 			if (penalty < bestPenalty) {
 				bestPenalty = penalty
 				maskPattern = i
@@ -418,7 +452,7 @@ function applyMask(matrix, maskPattern) {
 			}
 		}
 	} else if (maskPattern !== "none") {
-		matrix = mask(matrix, Number(maskPattern))
+		matrix = mask(matrix, Number(maskPattern), ecLevel)
 	}
 	return { matrix, maskPattern }
 }
@@ -434,6 +468,7 @@ function generate(message, options) {
 	//	Interleave the Blocks
 	const codewordsInterleaved = interleave(codewordsGroup)
 	const correctionInterleaved = interleave(correctionGroup)
+	// const correctionInterleaved = [209, 239, 196, 207, 78, 195, 109]
 	//	Get final code bits
 	const codeBlock = createCodeBlock(codewordsInterleaved, correctionInterleaved, codeVersionTable.getReminderBits(version))
 	//	Place modules to the matrix
@@ -442,7 +477,9 @@ function generate(message, options) {
 	applyVersionInformation(rawMatrix, versionInformationTable.getVersionCode(version))
 	//	Apply mask
 	const { matrix, maskPattern } = applyMask(rawMatrix, options.maskPattern || "auto", ecLevel)
-	console.log({ ecLevel, mode, version, codewords, codewordsOptions, codewordsGroup, correctionGroup, codeBlock, maskPattern, matrix })
+	// console.log({ ecLevel, mode, version, codewords, codewordsOptions, codewordsGroup, correctionGroup, codeBlock, maskPattern, matrix })
+	// console.log(codeBlock)
+	console.log(codewordsInterleaved.join(","), correctionInterleaved.join(","))
 	return matrix
 }
 
@@ -473,12 +510,12 @@ function showQRCode() {
 		return
 	}
 	const ecLevel = document.getElementById("ecLevel").value
-	const mask = document.getElementById("mask").value
-	drawMatrix(generate(text, { ecLevel, mask }))
+	const maskPattern = document.getElementById("mask").value
+	drawMatrix(generate(text, { ecLevel, maskPattern }))
 }
 
 const { cnv, ctx } = setCanvas(200)
-const colors = ["#fff", "#000", "#646464", "red", "green", "blue", "magenta", "cyan", "orange", "purple"]
+const colors = ["white", "black", "grey", "red", "green", "blue", "magenta", "cyan", "orange", "purple"]
 
 document.getElementById("text").addEventListener("input", showQRCode)
 document.getElementById("ecLevel").addEventListener("input", showQRCode)
@@ -488,8 +525,25 @@ document.querySelectorAll('a[data-type="preset"]').forEach(preset => {
 		document.getElementById("text").value = e.target.dataset.text || ""
 		document.getElementById("ecLevel").value = e.target.dataset.eclevel || "M"
 		document.getElementById("mask").value = e.target.dataset.mask || "auto"
+		document.getElementById("image").src = e.target.dataset.image || ""
 		showQRCode()
 	})
 })
 
 showQRCode()
+
+/*
+const m1 = createMatrix({version: 1, codeBlock: "1011100111000010100100100001111010110111000101000100010111010100110110100010011010001010011101110111010110001000011101011000011110001010100010000111101010110111100010011010001001010110110101111010010111110100"})
+const m2 = mask(m1, 0, "L")
+drawMatrix(m2)
+
+what we have
+what should be
+
+0010000001011011000010110111100011010001011100101101110001001101010000110100000011101100000100011110110000010001111011000001000111101100000100011110110010010101010100001110011100110110101101101010011011010000
+0010000001011011000010110111100011010001011100101101110001001101010000110100000011101100000100011110110000010001111011000001000111101100000100011110110111010001111011111100010011001111010011101100001101101101
+[32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17, 236, 17, 236, 149, 80, 231, 54, 182, 166, 208]
+[32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17, 236, 17, 237, 209, 239, 196, 207, 78, 195, 109]
+
+[32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17, 236, 17, 236, 149, 80, 231, 54, 182, 166, 208]
+*/

@@ -6,37 +6,49 @@
 	<title>QR-code generator</title>
 	<style type="text/css">
 		canvas {
-			margin: 100px;
+			margin: 50px;
 		}
 		#text {
 			width: 100%;
 		}
+		.row {
+			display: flex;
+		}
+
+		.col {
+			flex: 50%;
+		}
 	</style>
 </head>
 <body>
-	<div id="qr"></div>
-	<select id="ecLevel">
-		<option value="L">L</option>
-		<option value="M">M</option>
-		<option value="Q">Q</option>
-		<option value="H">H</option>
-	</select>
-	<select id="mask">
-		<option value="auto">auto</option>
-		<option value="0">0</option>
-		<option value="1">1</option>
-		<option value="2">2</option>
-		<option value="3">3</option>
-		<option value="4">4</option>
-		<option value="5">5</option>
-		<option value="6">6</option>
-		<option value="7">7</option>
-		<option value="none">none</option>
-	</select>
-	<textarea id="text" rows="4"></textarea>
+	<div class="row">
+		<div class="col" id="qr"></div>
+		<div class="col"><img id="image"></div>
+	</div>
+	<div>
+		<select id="ecLevel">
+			<option value="L">L</option>
+			<option value="M">M</option>
+			<option value="Q">Q</option>
+			<option value="H">H</option>
+		</select>
+		<select id="mask">
+			<option value="auto">auto</option>
+			<option value="0">0</option>
+			<option value="1">1</option>
+			<option value="2">2</option>
+			<option value="3">3</option>
+			<option value="4">4</option>
+			<option value="5">5</option>
+			<option value="6">6</option>
+			<option value="7">7</option>
+			<option value="none">none</option>
+		</select>
+		<textarea id="text" rows="4"></textarea>
+	</div>
 	<div>
 		<p><a href="#5-Q-Byte-auto" data-type="preset" data-eclevel="Q" data-mask="auto" data-text="There\'s a frood who really knows where his towel is.">5-Q-Byte-auto</a></p>
-		<p><a href="#1-L-Alpha-0" data-type="preset" data-eclevel="L" data-mask="0" data-text="HELLO WORLD">1-L-Alpha-0</a></p>
+		<p><a href="#1-L-Alpha-0" data-type="preset" data-eclevel="L" data-mask="0" data-text="HELLO WORLD" data-image="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASIAAAEiCAIAAADS3EjhAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAElklEQVR4nO3dMXLcQAwAQdOl/3/5HDthshoBpLrzE09kTW1wKPD6fD5/gNLf6S8A7yczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcl9TF76ua+rSkc/nE/3l+3t1f93us0/UPaN7TjPIyQxyMoOczCAnM8jJDHIyg5zMICczyI1Ngdyb+rX+3tRUxM67sfNb7ZxccZpBTmaQkxnkZAY5mUFOZpCTGeRkBjmZQW7pFMi97pf+9+3zmJrVeOIz6jjNICczyMkMcjKDnMwgJzPIyQxyMoOczCD3yCmQJzqZXTj57MkECd/FaQY5mUFOZpCTGeRkBjmZQU5mkJMZ5GQGOVMgK3SbQtjAaQY5mUFOZpCTGeRkBjmZQU5mkJMZ5GQGuUdOgfy2DRYncx5T9+q3PaN7TjPIyQxyMoOczCAnM8jJDHIyg5zMICczyC2dAnnffotu20f32Xvve0YdpxnkZAY5mUFOZpCTGeRkBjmZQU5mkJMZ5MamQOyK+Bkn99kz+i5OM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIjU2BdJskTnZjvM/UfT7R7S+Z4jSDnMwgJzPIyQxyMoOczCAnM8jJDHIyg9zSN8LstPP9KTtnJk6+VXefp+6G0wxyMoOczCAnM8jJDHIyg5zMICczyMkMcqZA/tPtEXnihpJuoqL7yzs3hTjNICczyMkMcjKDnMwgJzPIyQxyMoOczCC3dApk59aNqUmOk+tOTa7s/M5TnGaQkxnkZAY5mUFOZpCTGeRkBjmZQU5mkLt2/mp+YudejZ0TJPd2zrV0n+04zSAnM8jJDHIyg5zMICczyMkMcjKDnMwgt3QXyImdcy3vm2zYeZ93cppBTmaQkxnkZAY5mUFOZpCTGeRkBjmZQW5sCmTnxo4T3VREt8/j/i9Pbew4sXM2xWkGOZlBTmaQkxnkZAY5mUFOZpCTGeRkBrmlu0B2/pY/NbnSTXKcXLez8+mfcJpBTmaQkxnkZAY5mUFOZpCTGeRkBjmZQW7pFMi9922S6N75MvU2mZNn9L7n6zSDnMwgJzPIyQxyMoOczCAnM8jJDHIyg9wjp0CeaGonx9RbXabmS3buEXGaQU5mkJMZ5GQGOZlBTmaQkxnkZAY5mUHOFMgPeeLsQreTo3vHzc777DSDnMwgJzPIyQxyMoOczCAnM8jJDHIyg9wjp0B2zkx0TuYeuj0iU7rZlI7TDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyS6dAnvhLf2fqjTDddU/mS07+oylOM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIXTv3PcCbOM0gJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxyMoOczCAnM8jJDHIyg5zMICczyMkMcjKDnMwgJzPIyQxy/wA1PARSdy8K2gAAAABJRU5ErkJggg==">1-L-Alpha-0</a></p>
 	</div>
 	<pre id="info"></pre>
 	<a href="https://www.thonky.com/qr-code-tutorial/">tutorial</a>
